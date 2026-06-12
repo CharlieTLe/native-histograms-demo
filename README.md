@@ -77,6 +77,17 @@ The demo app generates exponentially-distributed latencies with mean 100ms, givi
 | Native    | ~283ms | Close to theoretical value due to fine-grained exponential bucketing |
 | Classic   | ~340ms | Overshoots because it interpolates linearly between the fixed 0.25s and 0.5s bucket boundaries |
 
+### Cardinality
+
+The classic histogram creates **14 time series** (11 `_bucket` series for each `le` boundary + `+Inf`, plus `_sum`, `_count`, and `_created`), while the native histogram stores everything — count, sum, and ~80 exponential buckets — in a **single time series** using protobuf encoding.
+
+| | Classic | Native |
+|---|---|---|
+| Time series | 14 | 1 |
+| Buckets | 11 (fixed boundaries) | ~80 (exponential) |
+
+This matters at scale: if you add a label with 100 values, the classic histogram balloons to 1,400 series while the native histogram only goes to 100.
+
 ## Project Structure
 
 ```
