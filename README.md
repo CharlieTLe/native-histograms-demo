@@ -98,6 +98,18 @@ With 432 label combinations, the 95th percentile query is **~2x slower** for cla
 
 The classic query must fetch and `rate()` across 14 series per label combination before computing the quantile, while the native query operates on a single series per combination.
 
+### Storage
+
+The classic histogram dominates TSDB resource usage[^7]:
+
+| | Classic | Native |
+|---|---|---|
+| Series | 6,048 (82% of TSDB) | 432 (6% of TSDB) |
+| Samples per scrape | 6,048 float | 432 histogram |
+| `le` label index memory | 44 KB | 0 (not needed) |
+
+Each scrape ingests **14x more samples** for the classic histogram. The `le` label — which only exists for classic `_bucket` series — adds 44 KB of label index overhead[^8]. Native histograms avoid this entirely by encoding bucket data within each sample using protobuf.
+
 ## Project Structure
 
 ```
@@ -182,3 +194,5 @@ You can run both formats simultaneously by keeping `Buckets` and adding the `Nat
 [^4]: After a bucket merge (caused by exceeding `MaxBucketNumber`), the histogram will not reset its observations until at least this duration has elapsed. This prevents a cascade of resets under bursty load. The counter only starts after the merge event, not from histogram creation.
 [^5]: Observations with an absolute value at or below this threshold are counted in a special zero bucket rather than a regular exponential bucket. This avoids the problem of exponential buckets approaching zero requiring infinitely many buckets. For example, with a threshold of `0.001`, any observation in `[-0.001, 0.001]` goes into the zero bucket.
 [^6]: Measured by timing 10 `curl` requests to the Prometheus query API and averaging (excluding the first cold request). Reproduce with: `for i in $(seq 1 10); do curl -s -o /dev/null -w "%{time_total}\n" --get 'http://localhost:9090/api/v1/query' --data-urlencode 'query=histogram_quantile(0.95, sum by (handler) (demo_request_duration_seconds))'; done` and the same with `query=histogram_quantile(0.95, sum by (handler, le) (rate(demo_classic_request_duration_seconds_bucket[5m])))`.
+[^7]: Series counts and TSDB percentages from `curl http://localhost:9090/api/v1/status/tsdb`. The `seriesCountByMetricName` field shows 5,184 `_bucket` + 432 `_sum` + 432 `_count` = 6,048 classic series vs 432 native series. Samples per scrape from `scrape_samples_scraped{job="demo-app"}` (6,528 total) minus native series (432) gives 6,096 float samples; native contributes 432 histogram samples.
+[^8]: From the `memoryInBytesByLabelName` field in `curl http://localhost:9090/api/v1/status/tsdb`. The `le` label (44,124 bytes) is used exclusively by classic histogram `_bucket` series to identify bucket boundaries. Native histograms encode buckets within the sample itself and do not use this label.
