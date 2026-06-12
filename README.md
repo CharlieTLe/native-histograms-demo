@@ -119,10 +119,10 @@ prometheus.NewHistogram(prometheus.HistogramOpts{
 })
 ```
 
-- `NativeHistogramBucketFactor` — controls bucket width. `1.1` means each bucket boundary is 1.1x the previous. Lower = more precision, more buckets.
-- `NativeHistogramMaxBucketNumber` — caps the bucket count. If exceeded, buckets get merged (resolution decreases).
-- `NativeHistogramMinResetDuration` — minimum time before the histogram resets after a bucket merge.
-- `NativeHistogramZeroThreshold` — observations below this value go into the special zero bucket.
+- `NativeHistogramBucketFactor`[^2] — controls bucket width. `1.1` means each bucket boundary is 1.1x the previous. Lower = more precision, more buckets.
+- `NativeHistogramMaxBucketNumber`[^3] — caps the bucket count. If exceeded, buckets get merged (resolution decreases).
+- `NativeHistogramMinResetDuration`[^4] — minimum time before the histogram resets after a bucket merge.
+- `NativeHistogramZeroThreshold`[^5] — observations below this value go into the special zero bucket.
 
 You can keep `Buckets` alongside the native fields to emit both formats during a transition period. Remove `Buckets` once you're fully migrated.
 
@@ -156,3 +156,7 @@ Native histograms simplify PromQL because you don't need `rate()` wrapping for q
 You can run both formats simultaneously by keeping `Buckets` and adding the `NativeHistogram*` fields. The app will expose both, and Prometheus will ingest whichever format the scrape config allows. This lets you validate native histogram accuracy against your existing classic dashboards before removing the classic buckets.
 
 [^1]: For an exponential distribution with mean μ, the CDF is `F(x) = 1 − e^(−x/μ)`. Solving `F(x) = 0.95` for μ = 0.1s: `x = −0.1 × ln(0.05) ≈ 0.2996s`.
+[^2]: Native histograms use a exponential bucketing scheme where bucket boundaries grow by this factor. A factor of `1.1` produces boundaries at `..., 0.1, 0.11, 0.121, 0.1331, ...`. The factor determines the relative resolution error: a factor of `1.1` means any observation is at most ~10% away from a bucket boundary. Setting this to `1.0` disables native histograms entirely.
+[^3]: When the number of populated buckets exceeds this limit, the histogram merges adjacent buckets (doubling the effective bucket factor) to reduce the count. This acts as a safety valve against high-cardinality distributions consuming too much memory. A value of `0` means no limit.
+[^4]: After a bucket merge (caused by exceeding `MaxBucketNumber`), the histogram will not reset its observations until at least this duration has elapsed. This prevents a cascade of resets under bursty load. The counter only starts after the merge event, not from histogram creation.
+[^5]: Observations with an absolute value at or below this threshold are counted in a special zero bucket rather than a regular exponential bucket. This avoids the problem of exponential buckets approaching zero requiring infinitely many buckets. For example, with a threshold of `0.001`, any observation in `[-0.001, 0.001]` goes into the zero bucket.
