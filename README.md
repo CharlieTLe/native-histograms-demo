@@ -94,4 +94,65 @@ The demo app generates exponentially-distributed latencies with mean 100ms, givi
 docker compose down -v
 ```
 
+## Converting a Classic Histogram to Native
+
+### 1. Update the histogram options
+
+Replace the fixed `Buckets` with native histogram fields:
+
+```go
+// Before (classic)
+prometheus.NewHistogram(prometheus.HistogramOpts{
+    Name:    "request_duration_seconds",
+    Help:    "Request duration in seconds.",
+    Buckets: prometheus.DefBuckets,
+})
+
+// After (native)
+prometheus.NewHistogram(prometheus.HistogramOpts{
+    Name:                           "request_duration_seconds",
+    Help:                           "Request duration in seconds.",
+    NativeHistogramBucketFactor:    1.1,
+    NativeHistogramMaxBucketNumber: 100,
+    NativeHistogramMinResetDuration: 1 * time.Hour,
+    NativeHistogramZeroThreshold:   0.001,
+})
+```
+
+- `NativeHistogramBucketFactor` — controls bucket width. `1.1` means each bucket boundary is 1.1x the previous. Lower = more precision, more buckets.
+- `NativeHistogramMaxBucketNumber` — caps the bucket count. If exceeded, buckets get merged (resolution decreases).
+- `NativeHistogramMinResetDuration` — minimum time before the histogram resets after a bucket merge.
+- `NativeHistogramZeroThreshold` — observations below this value go into the special zero bucket.
+
+You can keep `Buckets` alongside the native fields to emit both formats during a transition period. Remove `Buckets` once you're fully migrated.
+
+### 2. Enable native histogram scraping in Prometheus
+
+Add `scrape_native_histograms: true` to your scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: my-app
+    scrape_native_histograms: true
+    static_configs:
+      - targets: ['my-app:8080']
+```
+
+Without this, Prometheus will only ingest the classic format even if the app exposes native histograms.
+
+### 3. Update your queries
+
+Native histograms simplify PromQL because you don't need `rate()` wrapping for quantiles:
+
+| Classic | Native |
+|---------|--------|
+| `histogram_quantile(0.95, rate(..._bucket[5m]))` | `histogram_quantile(0.95, metric_name)` |
+| `rate(..._sum[5m]) / rate(..._count[5m])` | `histogram_avg(metric_name)` |
+| `rate(..._count[5m])` | `histogram_count(metric_name)` |
+| N/A | `histogram_fraction(lower, upper, metric_name)` |
+
+### 4. Migration strategy
+
+You can run both formats simultaneously by keeping `Buckets` and adding the `NativeHistogram*` fields. The app will expose both, and Prometheus will ingest whichever format the scrape config allows. This lets you validate native histogram accuracy against your existing classic dashboards before removing the classic buckets.
+
 [^1]: For an exponential distribution with mean μ, the CDF is `F(x) = 1 − e^(−x/μ)`. Solving `F(x) = 0.95` for μ = 0.1s: `x = −0.1 × ln(0.05) ≈ 0.2996s`.
