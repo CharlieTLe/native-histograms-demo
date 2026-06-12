@@ -88,6 +88,16 @@ With 5 labels (`method`, `handler`, `status`, `service`, `region`) producing 432
 
 The classic histogram produces **14x more time series** for the same data with fewer buckets (11 fixed vs ~80 exponential).
 
+### Query Performance
+
+With 432 label combinations, the 95th percentile query is **~2x slower** for classic histograms[^6]:
+
+| | Native | Classic |
+|---|---|---|
+| Average | ~24ms | ~49ms |
+
+The classic query must fetch and `rate()` across 14 series per label combination before computing the quantile, while the native query operates on a single series per combination.
+
 ## Project Structure
 
 ```
@@ -171,3 +181,4 @@ You can run both formats simultaneously by keeping `Buckets` and adding the `Nat
 [^3]: When the number of populated buckets exceeds this limit, the histogram merges adjacent buckets (doubling the effective bucket factor) to reduce the count. This acts as a safety valve against high-cardinality distributions consuming too much memory. A value of `0` means no limit.
 [^4]: After a bucket merge (caused by exceeding `MaxBucketNumber`), the histogram will not reset its observations until at least this duration has elapsed. This prevents a cascade of resets under bursty load. The counter only starts after the merge event, not from histogram creation.
 [^5]: Observations with an absolute value at or below this threshold are counted in a special zero bucket rather than a regular exponential bucket. This avoids the problem of exponential buckets approaching zero requiring infinitely many buckets. For example, with a threshold of `0.001`, any observation in `[-0.001, 0.001]` goes into the zero bucket.
+[^6]: Measured by timing 10 `curl` requests to the Prometheus query API and averaging (excluding the first cold request). Reproduce with: `for i in $(seq 1 10); do curl -s -o /dev/null -w "%{time_total}\n" --get 'http://localhost:9090/api/v1/query' --data-urlencode 'query=histogram_quantile(0.95, sum by (handler) (demo_request_duration_seconds))'; done` and the same with `query=histogram_quantile(0.95, sum by (handler, le) (rate(demo_classic_request_duration_seconds_bucket[5m])))`.
