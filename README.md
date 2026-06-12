@@ -88,4 +88,10 @@ The demo app generates exponentially-distributed latencies with mean 100ms, givi
     └── main.go
 ```
 
+## Cleanup
+
+```bash
+docker compose down -v
+```
+
 [^1]: For an exponential distribution with mean μ, the CDF is `F(x) = 1 − e^(−x/μ)`. Solving `F(x) = 0.95` for μ = 0.1s: `x = −0.1 × ln(0.05) ≈ 0.2996s`.
